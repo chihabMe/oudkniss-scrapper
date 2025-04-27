@@ -216,7 +216,7 @@ def scrap_details(link):
         raise
 
 # --- Main Loop ---
-START, PAGES = 1, 200
+START, PAGES = 1, 20
 results = []
 all_links = []
 
