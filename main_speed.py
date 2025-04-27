@@ -1,3 +1,4 @@
+import os
 from seleniumwire import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -217,6 +218,11 @@ def scrap_details(link):
 
 # --- Main Loop ---
 START, PAGES = 1, 20
+START_FROM_ENV,PAGES_FROM_ENV  = os.getenv("START",None),os.getenv("PAGES",None)
+if START_FROM_ENV  and PAGES_FROM_ENV :
+    START = int(START_FROM_ENV)
+    PAGES = int(PAGES_FROM_ENV)
+
 results = []
 all_links = []
 
