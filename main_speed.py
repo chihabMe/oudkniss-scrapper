@@ -217,7 +217,7 @@ def scrap_details(link):
         raise
 
 # --- Main Loop ---
-START, PAGES = 1, 20
+START, PAGES = 1, 1
 START_FROM_ENV,PAGES_FROM_ENV  = os.getenv("START",None),os.getenv("PAGES",None)
 if START_FROM_ENV  and PAGES_FROM_ENV :
     START = int(START_FROM_ENV)

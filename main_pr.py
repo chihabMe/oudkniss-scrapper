@@ -7,7 +7,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 file_name = "cars"
 # Get environment variables if available
 START_FROM_ENV, PAGES_FROM_ENV = os.getenv("START", None), os.getenv("PAGES", None)
-START, PAGES = 1, 8
+START, PAGES = 1, 1
 if START_FROM_ENV and PAGES_FROM_ENV:
     START = int(START_FROM_ENV)
     PAGES = int(PAGES_FROM_ENV)
@@ -85,12 +85,13 @@ async def scrap_details_with_retry(page, link, max_retries=2):
 
 # --- Scrape Details Page ---
 async def scrap_details(page, link):
+    print("Starting scrapping ",link)
     try:
         await page.goto(link)
         
         # Wait for the main content to load with reduced timeout
         try:
-            await page.wait_for_selector("div.v-container.v-locale--is-ltr", timeout=3000)
+            await page.wait_for_selector("div.v-container.v-locale--is-ltr", timeout=6000)
         except PlaywrightTimeoutError:
             print(f"⚠️ Timed out waiting for page to load: {link}")
         
@@ -208,7 +209,8 @@ async def main():
         
         # First, collect all links from listing pages
         for p in range(START, START + PAGES):
-            url = f"https://www.ouedkniss.com/automobiles-voitures/{p}?priceUnit=MILLION&priceRangeMin=50"
+            host = "https://www.ouedkniss.com"
+            url = f"{host}/automobiles-voitures/{p}?priceUnit=MILLION&priceRangeMin=50"
                     
             print(f"\n🔍 Scraping page {p} of {START + PAGES - 1}: {url}")
             try:
@@ -227,11 +229,13 @@ async def main():
                 for e in elements:
                     try:
                         link_element = await e.query_selector("a")
+
                         link = await link_element.get_attribute("href")
                         if link is None or "/store/" in link:
                             continue
-                        all_links.append(link)
-                        print(f"🔗 Added link to queue: {link}")
+                        full_link = f"{host}{link}"
+                        all_links.append(full_link)
+                        print(f"🔗 Added link to queue: {full_link}")
                     except Exception:
                         pass
 
