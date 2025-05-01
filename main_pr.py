@@ -7,7 +7,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 file_name = "cars"
 # Get environment variables if available
 START_FROM_ENV, PAGES_FROM_ENV = os.getenv("START", None), os.getenv("PAGES", None)
-START, PAGES = 1, 1
+START, PAGES = 1, 2
 if START_FROM_ENV and PAGES_FROM_ENV:
     START = int(START_FROM_ENV)
     PAGES = int(PAGES_FROM_ENV)
@@ -68,11 +68,11 @@ async def infinite_scroll_until_no_data(page, sleep_time=0.5, step=500, smooth_d
     print("✅ Finished scrolling.")
 
 # --- Scrape Details Page with Retry Logic ---
-async def scrap_details_with_retry(page, link, max_retries=2):
+async def scrap_details_with_retry(page, link, max_retries=2, ctx=None):
     for attempt in range(1, max_retries + 1):
         try:
             print(f"🔍 Attempt {attempt}/{max_retries} to scrape {link}")
-            return await scrap_details(page, link)
+            return await scrap_details(page, link, ctx)
         except Exception as e:
             print(f"⚠️ Error on attempt {attempt}/{max_retries} for {link}: {str(e)}")
             if attempt < max_retries:
@@ -84,14 +84,17 @@ async def scrap_details_with_retry(page, link, max_retries=2):
                 return {}
 
 # --- Scrape Details Page ---
-async def scrap_details(page, link):
-    print("Starting scrapping ",link)
+async def scrap_details(pag, link, ctx=None):
+    if ctx is None:
+        return 
+    print("Starting scrapping ", link)
     try:
+        page = await ctx.new_page()
         await page.goto(link)
         
         # Wait for the main content to load with reduced timeout
         try:
-            await page.wait_for_selector("div.v-container.v-locale--is-ltr", timeout=6000)
+            await page.wait_for_selector("div.v-container.v-locale--is-ltr", timeout=4000)
         except PlaywrightTimeoutError:
             print(f"⚠️ Timed out waiting for page to load: {link}")
         
@@ -177,22 +180,25 @@ async def scrap_details(page, link):
         
         print(f"✅ Successfully scraped details from {link}")
         
+        await page.close()
         # Reduced wait time between requests
-        await asyncio.sleep(random.uniform(1, 2))
+        #await asyncio.sleep(random.uniform(0.2, 1))
         return spec_data
 
     except Exception as e:
         print(f"❌ Failed to scrape details for {link}: {e}")
+        if 'page' in locals():
+            await page.close()
         raise
 
 # --- Main Scraping Function ---
 async def main():
     results = []
-    all_links = []
+    host = "https://www.ouedkniss.com"
 
     async with async_playwright() as p:
         # Launch the browser (use headless=False to see the browser)
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=False)
         
         # Create a context with custom user-agent
         context = await browser.new_context(
@@ -204,71 +210,80 @@ async def main():
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         """)
         
-        # Create a new page
-        page = await context.new_page()
-        
-        # First, collect all links from listing pages
-        for p in range(START, START + PAGES):
-            host = "https://www.ouedkniss.com"
-            url = f"{host}/automobiles-voitures/{p}?priceUnit=MILLION&priceRangeMin=50"
-                    
-            print(f"\n🔍 Scraping page {p} of {START + PAGES - 1}: {url}")
+        # Process each listing page one by one
+        for page_num in range(START, START + PAGES):
+            page_results = []
+            url = f"{host}/automobiles-voitures/{page_num}?priceUnit=MILLION&priceRangeMin=50"
+            print(f"\n🔍 Processing listing page {page_num} of {START + PAGES - 1}: {url}")
+            
+            # Create a new page for each listing page
+            page = await context.new_page()
+            
             try:
                 await page.goto(url)
                 try:
                     await page.wait_for_selector(".search-page > div:nth-child(4) > div.search.mt-3", timeout=4000)
                 except PlaywrightTimeoutError:
-                    print(f"⚠️ Timed out waiting for page {p} to load. Continuing anyway...")
+                    print(f"⚠️ Timed out waiting for page {page_num} to load. Continuing anyway...")
                 
                 await close_popup_if_exists(page)
                 await infinite_scroll_until_no_data(page)
 
+                # Get all links from this listing page
                 elements = await page.query_selector_all(".search-page > div:nth-child(4) > div.search.mt-3 > div > div.v-lazy > div > div")
-                print(f"📋 Found {len(elements)} ads on page {p}")
-
+                print(f"📋 Found {len(elements)} ads on page {page_num}")
+                
+                links = []
                 for e in elements:
                     try:
                         link_element = await e.query_selector("a")
-
                         link = await link_element.get_attribute("href")
                         if link is None or "/store/" in link:
                             continue
                         full_link = f"{host}{link}"
-                        all_links.append(full_link)
-                        print(f"🔗 Added link to queue: {full_link}")
-                    except Exception:
-                        pass
-
-            except Exception as e:
-                print(f"⚠️ Failed to process page {url}: {e}")
-
-        print(f"\n📊 Total links collected: {len(all_links)}")
-
-        # Process links with optimized delays
-        for i, link in enumerate(all_links):
-            print(f"\n🔍 Processing link {i+1}/{len(all_links)}")
-            try:
-                # Add a shorter random delay between requests
-                wait_time = random.uniform(0.5, 1.5)
-                print(f"⏳ Waiting {wait_time:.1f} seconds before next request...")
-                await asyncio.sleep(wait_time)
+                        links.append(full_link)
+                        print(f"🔗 Found link: {full_link}")
+                    except Exception as e:
+                        print(f"⚠️ Error extracting link: {e}")
                 
-                data = await scrap_details_with_retry(page, link)
-                if data:
-                    results.append(data)
-                    
-                    # Save intermediate results less frequently
-                    if (i + 1) % 10 == 0 or i == len(all_links) - 1:
-                        print(f"💾 Saving intermediate results ({len(results)} items so far)...")
-                        with open(f"{file_name}_intermediate_{i+1}.json", "w", encoding="utf-8") as f:
-                            json.dump(results, f, ensure_ascii=False, indent=4)
+                # Close the listing page as we don't need it anymore
+                await page.close()
+                
+                # Process each detail page from this listing page
+                for i, link in enumerate(links):
+                    print(f"\n📄 Processing detail {i+1}/{len(links)} from page {page_num}")
+                    try:
+                        # Add a random delay between requests
+                        wait_time = random.uniform(0.5, 1.5)
+                        print(f"⏳ Waiting {wait_time:.1f} seconds before next request...")
+                        await asyncio.sleep(wait_time)
                         
+                        data = await scrap_details_with_retry(None, link, 2, context)
+                        if data:
+                            data["page"]=f"{page_num}_{i}"
+                            page_results.append(data)
+                            
+                            # Save intermediate results after each detail page
+                            if (i + 1) % 5 == 0 or i == len(links) - 1:
+                                print(f"💾 Saving intermediate results ({len(page_results)} items from this page)...")
+                                with open(f"{file_name}_page_{page_num}_intermediate.json", "w", encoding="utf-8") as f:
+                                    json.dump(page_results, f, ensure_ascii=False, indent=4)
+                                
+                    except Exception as e:
+                        print(f"❌ Failed to process {link}: {str(e)}")
+                
+                # Add this page's results to the main results
+                results.extend(page_results)
+                
+                # Save after each listing page is fully processed
+                print(f"💾 Saving results after page {page_num} ({len(results)} total items)...")
+                with open(f"{file_name}_final.json", "w", encoding="utf-8") as f:
+                    json.dump(results, f, ensure_ascii=False, indent=4)
+                
             except Exception as e:
-                print(f"❌ Failed to process {link}: {str(e)}")
-
-        # --- Save final results to JSON ---
-        with open(f"{file_name}_final.json", "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=4)
+                print(f"⚠️ Failed to process listing page {url}: {e}")
+                if 'page' in locals():
+                    await page.close()
 
         print("\n✅ Scraping completed!")
         print(f"📊 Total items scraped: {len(results)}")
